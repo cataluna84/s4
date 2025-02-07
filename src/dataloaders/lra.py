@@ -6,17 +6,25 @@ import os
 import pickle
 from pathlib import Path
 
+from collections import Counter, OrderedDict
+from typing import Dict, List, Optional
 import torch
 from torch import nn
 import torch.nn.functional as F
-import torchtext
+from tokenizers import Tokenizer, normalizers
+from tokenizers.pre_tokenizers import Whitespace
+from tokenizers.models import WordLevel
+from tokenizers.processors import TemplateProcessing
+from tokenizers.normalizers import NFD, Lowercase, StripAccents
+from tokenizers.trainers import WordLevelTrainer
+
 import torchvision
 from einops.layers.torch import Rearrange, Reduce
 from PIL import Image  # Only used for Pathfinder
 from datasets import DatasetDict, Value, load_dataset
 
 from src.dataloaders.base import default_data_path, SequenceDataset, ImageResolutionSequenceDataset
-
+import pandas as pd 
 
 class IMDB(SequenceDataset):
     _name_ = "imdb"
@@ -58,6 +66,7 @@ class IMDB(SequenceDataset):
 
         if stage == "test" and hasattr(self, "dataset_test"):
             return
+       # TODO : vocab is optional here 
         dataset, self.tokenizer, self.vocab = self.process_dataset()
         print(
             f"IMDB {self.level} level | min_freq {self.min_freq} | vocab size {len(self.vocab)}"
@@ -82,7 +91,7 @@ class IMDB(SequenceDataset):
         xs, ys = zip(*[(data["input_ids"], data["label"]) for data in batch])
         lengths = torch.tensor([len(x) for x in xs])
         xs = nn.utils.rnn.pad_sequence(
-            xs, padding_value=self.vocab["<pad>"], batch_first=True
+            xs, padding_value=self.tokenizer.pad_token_id, batch_first=True
         )
         ys = torch.tensor(ys)
         return xs, ys, {"lengths": lengths}
@@ -98,77 +107,62 @@ class IMDB(SequenceDataset):
                 return self._load_from_cache(cache_dir)
 
         dataset = load_dataset(self._name_, cache_dir=self.data_dir)
+
         dataset = DatasetDict(train=dataset["train"], test=dataset["test"])
         if self.level == "word":
-            tokenizer = torchtext.data.utils.get_tokenizer(
-                "spacy", language="en_core_web_sm"
+            tokenizer = Tokenizer(WordLevel(unk_token="[UNK]"))
+            tokenizer.pre_tokenizer = Whitespace()
+            tokenizer.normalizer = normalizers.Sequence([NFD(), Lowercase(), StripAccents()])
+            tokenizer.post_processor = TemplateProcessing(
+                single="[CLS] $A [SEP]",
+                pair="[CLS] $A [SEP] $B:1 [SEP]:1",
+                special_tokens=[("[CLS]", 1), ("[SEP]", 2)],
             )
+            trainer = WordLevelTrainer(min_frequency = self.min_freq)
+            tokenizer.train_from_iterator(dataset["train"]["tokens"], trainer=trainer)
+
         else:  # self.level == 'char'
             tokenizer = list  # Just convert a string to a list of chars
         # Account for <bos> and <eos> tokens
         l_max = self.l_max - int(self.append_bos) - int(self.append_eos)
-        tokenize = lambda example: {"tokens": tokenizer(example["text"])[:l_max]}
+        tokenize = lambda example: tokenizer(example["text"], truncation=True, max_length=l_max)
+
         dataset = dataset.map(
             tokenize,
             remove_columns=["text"],
-            keep_in_memory=True,
-            load_from_cache_file=False,
-            num_proc=max(self.n_workers, 1),
-        )
-        vocab = torchtext.vocab.build_vocab_from_iterator(
-            dataset["train"]["tokens"],
-            min_freq=self.min_freq,
-            specials=(
-                ["<pad>", "<unk>"]
-                + (["<bos>"] if self.append_bos else [])
-                + (["<eos>"] if self.append_eos else [])
-            ),
-        )
-        vocab.set_default_index(vocab["<unk>"])
-
-        numericalize = lambda example: {
-            "input_ids": vocab(
-                (["<bos>"] if self.append_bos else [])
-                + example["tokens"]
-                + (["<eos>"] if self.append_eos else [])
-            )
-        }
-        dataset = dataset.map(
-            numericalize,
-            remove_columns=["tokens"],
+            batched=True,
             keep_in_memory=True,
             load_from_cache_file=False,
             num_proc=max(self.n_workers, 1),
         )
 
         if cache_dir is not None:
-            self._save_to_cache(dataset, tokenizer, vocab, cache_dir)
-        return dataset, tokenizer, vocab
+            self._save_to_cache(dataset, tokenizer,  cache_dir)
+        return dataset, tokenizer 
 
-    def _save_to_cache(self, dataset, tokenizer, vocab, cache_dir):
+    def _save_to_cache(self, dataset, tokenizer, cache_dir):
         cache_dir = self.cache_dir / self._cache_dir_name
         logger = logging.getLogger(__name__)
         logger.info(f"Saving to cache at {str(cache_dir)}")
         dataset.save_to_disk(str(cache_dir))
-        with open(cache_dir / "tokenizer.pkl", "wb") as f:
-            pickle.dump(tokenizer, f)
-        with open(cache_dir / "vocab.pkl", "wb") as f:
-            pickle.dump(vocab, f)
-
+        tokenizer.save(cache_dir/"word_tokenizer.json")
+        
     def _load_from_cache(self, cache_dir):
         assert cache_dir.is_dir()
         logger = logging.getLogger(__name__)
         logger.info(f"Load from cache at {str(cache_dir)}")
         dataset = DatasetDict.load_from_disk(str(cache_dir))
-        with open(cache_dir / "tokenizer.pkl", "rb") as f:
-            tokenizer = pickle.load(f)
-        with open(cache_dir / "vocab.pkl", "rb") as f:
-            vocab = pickle.load(f)
-        return dataset, tokenizer, vocab
+
+        tokenizer = Tokenizer.from_file(cache_dir/"word_tokenizer.json")
+        
+        
+        return dataset, tokenizer
 
     @property
     def _cache_dir_name(self):
         return f"l_max-{self.l_max}-level-{self.level}-min_freq-{self.min_freq}-append_bos-{self.append_bos}-append_eos-{self.append_eos}"
+
+import pandas as pd
 
 class TabularDataset(torch.utils.data.Dataset):
     def __init__(
@@ -182,25 +176,23 @@ class TabularDataset(torch.utils.data.Dataset):
         """
         col_idx: the indices of the columns.
         """
-        if csv_reader_params is None:
-            csv_reader_params = {}
+        # ... existing code ...
+
         format = format.lower()
         assert format in ["tsv", "csv"]
-        with io.open(os.path.expanduser(path), encoding="utf8") as f:
-            if format == "csv":
-                reader = torchtext.utils.unicode_csv_reader(f, **csv_reader_params)
-            elif format == "tsv":
-                reader = torchtext.utils.unicode_csv_reader(
-                    f, delimiter="\t", **csv_reader_params
-                )
-            else:
-                reader = f
-            if skip_header:
-                next(reader)
-            self._data = [
-                line if col_idx is None else [line[c] for c in col_idx]
-                for line in reader
-            ]
+        
+        if format == "csv":
+            self._data = pd.read_csv(os.path.expanduser(path), **csv_reader_params)
+        elif format == "tsv":
+            self._data = pd.read_csv(os.path.expanduser(path), sep="\t", **csv_reader_params)
+        
+        if skip_header:
+            self._data = self._data.iloc[1:]
+        
+        if col_idx is not None:
+            self._data = self._data.iloc[:, col_idx]
+
+        self._data = self._data.values.tolist()
 
     def __len__(self):
         return len(self._data)
@@ -215,6 +207,41 @@ class TabularDataset(torch.utils.data.Dataset):
 def listops_tokenizer(s):
     return s.translate({ord("]"): ord("X"), ord("("): None, ord(")"): None}).split()
 
+def tokens_to_indices(
+    ordered_dict: Dict, min_freq: int = 1, specials: Optional[List[str]] = None, special_first: bool = True
+) :
+    r"""Code which maps tokens to indices.
+
+    Note that the ordering in which key value pairs were inserted in the `ordered_dict` will be respected when building the vocab.
+    Therefore if sorting by token frequency is important to the user, the `ordered_dict` should be created in a way to reflect this.
+
+    Args:
+        ordered_dict: Ordered Dictionary mapping tokens to their corresponding occurance frequencies.
+        min_freq: The minimum frequency needed to include a token in the vocabulary.
+        specials: Special symbols to add. The order of supplied tokens will be preserved.
+        special_first: Indicates whether to insert symbols at the beginning or at the end.
+
+    Returns:
+        list: A list of tokens
+    Examples:
+ 
+    """
+    specials = specials or []
+    for token in specials:
+        ordered_dict.pop(token, None)
+
+    tokens = []
+    # Save room for special tokens
+    for token, freq in ordered_dict.items():
+        if freq >= min_freq:
+            tokens.append(token)
+
+    if special_first:
+        tokens[0:0] = specials
+    else:
+        tokens.extend(specials)
+
+    return tokens
 
 class ListOps(SequenceDataset):
     _name_ = "listops"
@@ -264,8 +291,8 @@ class ListOps(SequenceDataset):
     def setup(self, stage=None):
         if stage == "test" and hasattr(self, "dataset_test"):
             return
-        dataset, self.tokenizer, self.vocab = self.process_dataset()
-        self.vocab_size = len(self.vocab)
+        dataset, self.tokenizer, self.vocab_size = self.process_dataset()
+        
         dataset.set_format(type="torch", columns=["input_ids", "Target"])
         self.dataset_train, self.dataset_val, self.dataset_test = (
             dataset["train"],
@@ -315,21 +342,30 @@ class ListOps(SequenceDataset):
             load_from_cache_file=False,
             num_proc=max(self.n_workers, 1),
         )
-        vocab = torchtext.vocab.build_vocab_from_iterator(
-            dataset["train"]["tokens"],
-            specials=(
+        # Compute the vocabulary size from the training set
+        counter = Counter()
+        for tokens in dataset["train"]["tokens"]:
+            counter.update(tokens)
+        # First sort by descending frequency, then lexicographically
+        sorted_by_freq_tuples = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
+        ordered_dict = OrderedDict(sorted_by_freq_tuples)
+        
+        vocab_size = len(ordered_dict)
+
+        special_tokens = (
                 ["<pad>", "<unk>"]
                 + (["<bos>"] if self.append_bos else [])
                 + (["<eos>"] if self.append_eos else [])
-            ),
-        )
-        vocab.set_default_index(vocab["<unk>"])
+            )
+        
+        self.pad_token_id = 0
 
         numericalize = lambda example: {
-            "input_ids": vocab(
+            "input_ids": tokens_to_indices(
                 (["<bos>"] if self.append_bos else [])
                 + example["tokens"]
-                + (["<eos>"] if self.append_eos else [])
+                + (["<eos>"] if self.append_eos else []), 
+                specials=special_tokens
             )
         }
         dataset = dataset.map(
@@ -341,18 +377,16 @@ class ListOps(SequenceDataset):
         )
 
         if cache_dir is not None:
-            self._save_to_cache(dataset, tokenizer, vocab, cache_dir)
-        return dataset, tokenizer, vocab
+            self._save_to_cache(dataset, tokenizer, cache_dir)
+        return dataset, tokenizer, vocab_size
 
-    def _save_to_cache(self, dataset, tokenizer, vocab, cache_dir):
+    def _save_to_cache(self, dataset, tokenizer, cache_dir):
         cache_dir = self.cache_dir / self._cache_dir_name
         logger = logging.getLogger(__name__)
         logger.info(f"Saving to cache at {str(cache_dir)}")
         dataset.save_to_disk(str(cache_dir))
         with open(cache_dir / "tokenizer.pkl", "wb") as f:
             pickle.dump(tokenizer, f)
-        with open(cache_dir / "vocab.pkl", "wb") as f:
-            pickle.dump(vocab, f)
 
     def _load_from_cache(self, cache_dir):
         assert cache_dir.is_dir()
@@ -361,9 +395,7 @@ class ListOps(SequenceDataset):
         dataset = DatasetDict.load_from_disk(str(cache_dir))
         with open(cache_dir / "tokenizer.pkl", "rb") as f:
             tokenizer = pickle.load(f)
-        with open(cache_dir / "vocab.pkl", "rb") as f:
-            vocab = pickle.load(f)
-        return dataset, tokenizer, vocab
+        return dataset, tokenizer
 
 class PathFinderDataset(torch.utils.data.Dataset):
     """Path Finder dataset."""
@@ -579,16 +611,16 @@ class AAN(SequenceDataset):
             lengths1 = torch.tensor([len(x) for x in xs1])
             lengths2 = torch.tensor([len(x) for x in xs2])
             xs1 = nn.utils.rnn.pad_sequence(
-                xs1, padding_value=self.vocab["<pad>"], batch_first=True
+                xs1, padding_value=self.pad_token_id, batch_first=True
             )
             xs2 = nn.utils.rnn.pad_sequence(
-                xs2, padding_value=self.vocab["<pad>"], batch_first=True
+                xs2, padding_value=self.pad_token_id, batch_first=True
             )
             # Pad both to same length
             # Shape (batch, length)
             L = max(xs1.size(1), xs2.size(1))
-            xs1 = F.pad(xs1, (0, L-xs1.size(1)), value=self.vocab["<pad>"])
-            xs2 = F.pad(xs2, (0, L-xs2.size(1)), value=self.vocab["<pad>"])
+            xs1 = F.pad(xs1, (0, L-xs1.size(1)), value=self.pad_token_id)
+            xs2 = F.pad(xs2, (0, L-xs2.size(1)), value=self.pad_token_id)
             ys = torch.tensor(ys)
             # return xs1, xs2, ys, lengths1, lengths2
 
@@ -637,21 +669,30 @@ class AAN(SequenceDataset):
             load_from_cache_file=False,
             num_proc=max(self.n_workers, 1),
         )
-        vocab = torchtext.vocab.build_vocab_from_iterator(
-            dataset["train"]["tokens1"] + dataset["train"]["tokens2"],
-            specials=(
+        self.pad_token_id = 0
+
+        counter = Counter()
+        for tokens in dataset["train"]["tokens1"] + dataset["train"]["tokens2"]:
+            counter.update(tokens)
+        # First sort by descending frequency, then lexicographically
+        sorted_by_freq_tuples = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
+        ordered_dict = OrderedDict(sorted_by_freq_tuples)
+
+        vocab_size = len(ordered_dict)
+
+        special_tokens=(
                 ["<pad>", "<unk>"]
                 + (["<bos>"] if self.append_bos else [])
                 + (["<eos>"] if self.append_eos else [])
-            ),
-        )
-        vocab.set_default_index(vocab["<unk>"])
-
-        encode = lambda text: vocab(
+            )
+        
+        encode = lambda text: tokens_to_indices(
             (["<bos>"] if self.append_bos else [])
             + text
-            + (["<eos>"] if self.append_eos else [])
+            + (["<eos>"] if self.append_eos else []),
+            specials=special_tokens
         )
+
         numericalize = lambda example: {
             "input_ids1": encode(example["tokens1"]),
             "input_ids2": encode(example["tokens2"]),
@@ -665,8 +706,8 @@ class AAN(SequenceDataset):
         )
 
         if cache_dir is not None:
-            self._save_to_cache(dataset, tokenizer, vocab, cache_dir)
-        return dataset, tokenizer, vocab
+            self._save_to_cache(dataset, tokenizer, cache_dir)
+        return dataset, tokenizer, vocab_size
 
     def _save_to_cache(self, dataset, tokenizer, vocab, cache_dir):
         cache_dir = self.cache_dir / self._cache_dir_name
@@ -675,8 +716,6 @@ class AAN(SequenceDataset):
         dataset.save_to_disk(str(cache_dir))
         with open(cache_dir / "tokenizer.pkl", "wb") as f:
             pickle.dump(tokenizer, f)
-        with open(cache_dir / "vocab.pkl", "wb") as f:
-            pickle.dump(vocab, f)
 
     def _load_from_cache(self, cache_dir):
         assert cache_dir.is_dir()
@@ -685,6 +724,4 @@ class AAN(SequenceDataset):
         dataset = DatasetDict.load_from_disk(str(cache_dir))
         with open(cache_dir / "tokenizer.pkl", "rb") as f:
             tokenizer = pickle.load(f)
-        with open(cache_dir / "vocab.pkl", "rb") as f:
-            vocab = pickle.load(f)
-        return dataset, tokenizer, vocab
+        return dataset, tokenizer, 
