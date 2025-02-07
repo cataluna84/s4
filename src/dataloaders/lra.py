@@ -10,6 +10,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import torchtext
+from torchtext.vocab import build_vocab_from_iterator
 import torchvision
 from einops.layers.torch import Rearrange, Reduce
 from PIL import Image  # Only used for Pathfinder
@@ -115,7 +116,7 @@ class IMDB(SequenceDataset):
             load_from_cache_file=False,
             num_proc=max(self.n_workers, 1),
         )
-        vocab = torchtext.vocab.build_vocab_from_iterator(
+        vocab = build_vocab_from_iterator(
             dataset["train"]["tokens"],
             min_freq=self.min_freq,
             specials=(
