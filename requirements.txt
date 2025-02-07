@@ -1,29 +1,32 @@
-numpy
-scipy
-pandas
-scikit-learn
-matplotlib
-tqdm
-rich
-torchtext
+numpy==1.26.4
+scipy==1.13.1
+pandas==2.2.2
+scikit-learn==1.6.1
+matplotlib==3.10.0
+tqdm==4.67.1
+rich==13.9.4
+# torchtext  # Now we have to compile it manually
+ninja==1.11.1.3  # For manual compilation of `torchtext`
 lit # Getting installation errors with torch 2.0 if this isn't installed
-# torchvision
+torch @ https://download.pytorch.org/whl/cu124/torch-2.5.1%2Bcu124-cp311-cp311-linux_x86_64.whl
+torchaudio @ https://download.pytorch.org/whl/cu124/torchaudio-2.5.1%2Bcu124-cp311-cp311-linux_x86_64.whl
+torchvision @ https://download.pytorch.org/whl/cu124/torchvision-0.20.1%2Bcu124-cp311-cp311-linux_x86_64.whl
 pytorch-lightning==2.0.4
-hydra-core
-omegaconf
-wandb
-einops
-cmake # For pykeops support
+hydra-core==1.3.2
+omegaconf==2.3.0
+wandb==0.19.5
+einops==0.8.0
+cmake==3.31.4 # For pykeops support
 # pykeops # Seems to cause various issues; leaving uninstalled by default
-transformers # For some schedulers
+transformers==4.48.2 # For some schedulers
 
 # Model specific packges
 # pytorch-fast-transformers # for Performer
 
 # Dataset specific packages
-datasets # LRA
+datasets==3.2.0 # LRA
 sktime # BIDMC
-scikit-learn # Impedance
-numba # Impedance
+scikit-learn==1.6.1 # Impedance; redundant
+numba==0.61.0 # Impedance
 gluonts # Monash
 timm==0.5.4 # ImageNet
