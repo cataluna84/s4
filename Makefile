@@ -1,3 +1,7 @@
+.PHONY: autoformat lint dev lib torchtext
+
+.ONESHELL:
+
 autoformat:
 	black src/ checkpoints/ models/
 	isort --atomic src/ checkpoints/ models/
@@ -10,3 +14,12 @@ lint:
 
 dev:
 	pip install -r requirements-dev.txt
+
+lib:
+	pip install -r requirements.txt
+
+torchtext: lib
+	git clone https://github.com/pytorch/text build/torchtext
+	cd build/torchtext
+	git submodule update --init --recursive
+	python setup.py clean install
