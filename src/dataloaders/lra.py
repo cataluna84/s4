@@ -136,7 +136,7 @@ class IMDB(SequenceDataset):
 
         if stage == "test" and hasattr(self, "dataset_test"):
             return
-       # TODO : vocab is optional here 
+        
         dataset, self.tokenizer, self.vocab = self.process_dataset()
         self.vocab_size = len(self.vocab)
         print(
@@ -165,10 +165,14 @@ class IMDB(SequenceDataset):
             xs = nn.utils.rnn.pad_sequence(
                 xs, padding_value=self.vocab['<pad>'], batch_first=True
             )
-        else : 
-            #TODO: (louis) implement pad_sequence for token level with transformers
-            raise NotImplementedError("WIP, you have to code it my friend")
 
+            print(f'{xs=}')
+            print(f'{xs.shape=}')
+        else : 
+            xs = nn.utils.rnn.pad_sequence(
+                xs, padding_value=self.tokenizer.token_to_id("[PAD]"), batch_first=True
+            )
+        
         ys = torch.tensor(ys)
         return xs, ys, {"lengths": lengths}
 
@@ -194,9 +198,10 @@ class IMDB(SequenceDataset):
                 pair="[CLS] $A [SEP] $B:1 [SEP]:1",
                 special_tokens=[("[CLS]", 1), ("[SEP]", 2)],
             )
-            trainer = WordLevelTrainer(min_frequency = self.min_freq)
-            tokenizer.train_from_iterator(dataset["train"]["tokens"], trainer=trainer)
-            tokenize = lambda example: tokenizer(example["text"], truncation=True, max_length=l_max)
+            trainer = WordLevelTrainer(min_frequency = self.min_freq, special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"])
+            tokenizer.train_from_iterator(dataset["train"]["text"], trainer=trainer)
+            tokenizer.enable_truncation(max_length=l_max)
+            tokenize = lambda example: {'input_ids' : tokenizer.encode(example["text"]).ids}
             dataset = dataset.map(
                 tokenize,
                 remove_columns=["text"],
@@ -224,8 +229,6 @@ class IMDB(SequenceDataset):
                 + (["<eos>"] if self.append_eos else [])
             )
             vocab = create_vocab_from_iterable(dataset['train']["tokens"], specials=special_tokens)
-
-            self.tokenizer.pad_token_id = 0
 
             numericalize = lambda example: {
                 "input_ids": tokens_to_indices(
@@ -259,7 +262,7 @@ class IMDB(SequenceDataset):
             with open(cache_dir / "vocab.pkl", "wb") as g:
                 pickle.dump(vocab, g)    
         else : # The tokenizer is a HF tokenizer
-            tokenizer.save(cache_dir / "tokenizer.json")
+            tokenizer.save(str(cache_dir / "tokenizer.json"))
         dataset.save_to_disk(str(cache_dir))
         
     def _load_from_cache(self, cache_dir):
@@ -268,7 +271,7 @@ class IMDB(SequenceDataset):
         logger.info(f"Load from cache at {str(cache_dir)}")
         dataset = DatasetDict.load_from_disk(str(cache_dir))
         if self.level == "word":
-            tokenizer = Tokenizer.from_file(cache_dir/"tokenizer.json")
+            tokenizer = Tokenizer.from_file(str(cache_dir/"tokenizer.json"))
             vocab = tokenizer.get_vocab()
         else : 
             with open(cache_dir / "tokenizer.pkl", "rb") as f:
