@@ -1,29 +1,32 @@
-numpy
-scipy
-pandas
-scikit-learn
-matplotlib
-tqdm
-rich
-torchtext
-lit # Getting installation errors with torch 2.0 if this isn't installed
-# torchvision
-pytorch-lightning==2.0.4
-hydra-core
-omegaconf
-wandb
-einops
-cmake # For pykeops support
+-c constraints.txt
+
+numpy>=1.26.4,<1.27
+scipy>=1.13.1,<1.14
+pandas>=2.2.2,<2.3
+scikit-learn>=1.6.1,<1.7
+matplotlib>=3.10.0,<3.11
+tqdm>=4.67.1,<4.68
+rich>=13.9.4,<13.10
+ninja>=1.11.1.3,<1.12  # For manual compilation of `torchtext`
+lit>=18.1.8,<18.2  # Getting installation errors with torch 2.0 if this isn't installed
+pytorch-lightning>=2.5.0,<2.6.0
+hydra-core>=1.3.2,<1.4
+omegaconf>=2.3.0,<2.4
+wandb>=0.19.6,<0.20.0
+einops>=0.8.0,<0.9
+cmake>=3.31.4,<3.32  # For pykeops support
 # pykeops # Seems to cause various issues; leaving uninstalled by default
-transformers # For some schedulers
+transformers>=4.48.2,<4.49  # For some schedulers
 
 # Model specific packges
 # pytorch-fast-transformers # for Performer
 
 # Dataset specific packages
-datasets # LRA
-sktime # BIDMC
-scikit-learn # Impedance
-numba # Impedance
-gluonts # Monash
-timm==0.5.4 # ImageNet
+datasets>=3.2.0,<3.3  # LRA
+sktime>=0.36.0,<0.37  # BIDMC
+# scikit-learn>=1.6.1,<1.7  # Impedance; redundant
+numba>=0.61.0,<0.62  # Impedance
+gluonts>=0.16.0,<0.17  # Monash
+timm>=1.0.14,<1.1  # ImageNet
+
+gcsfs<2024.10.0  # For datasets on Colab

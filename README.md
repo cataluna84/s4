@@ -44,6 +44,22 @@ conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cud
 pip install -r requirements.txt
 ```
 
+#### Requirements in 2025
+PyTorch doesn't support Anaconda anymore, and the latest CUDA is preferred.
+Three phases of advancing the dependencies to the latest:
+1. CUDA 12.4, PyTorch 2.5.1, Python 3.11
+2. CUDA 12.6, PyTorch 2.6.0, Python 3.12
+3. CUDA 12.8, PyTorch 2.7.0, Python 3.13
+
+So new example installation (TBA):
+```sh
+# (TBA) A script that helps install CUDA on a Ubuntu 22.04 machine.
+```
+```sh
+pip install -r requirements.txt
+```
+
+The three phases will be verified on Colab with [notebooks/colab.ipynb](notebooks/colab.ipynb).
 
 ### Structured Kernels
 
