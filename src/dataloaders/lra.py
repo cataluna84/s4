@@ -93,8 +93,8 @@ def tokens_to_indices(tokens, vocab):
     Returns:
         list: A list of indices corresponding to the input tokens.
     """
-    # TODO: (louis) Could be more elegant and using the unknow token 
-    return [vocab[token] if token in vocab.keys() else -1 for token in tokens]
+
+    return [vocab[token] if token in vocab.keys() else vocab['<unk>'] for token in tokens]
 
 
 class IMDB(SequenceDataset):
@@ -163,17 +163,14 @@ class IMDB(SequenceDataset):
         xs, ys = zip(*[(data["input_ids"], data["label"]) for data in batch])
         lengths = torch.tensor([len(x) for x in xs])
         if self.level == "char":
-            xs = nn.utils.rnn.pad_sequence(
-                xs, padding_value=self.vocab['<pad>'], batch_first=True
-            )
-
-            print(f'{xs=}')
-            print(f'{xs.shape=}')
+            padding_val = self.vocab['<pad>']
         else : 
-            xs = nn.utils.rnn.pad_sequence(
-                xs, padding_value=self.tokenizer.token_to_id("[PAD]"), batch_first=True
-            )
+            padding_val = self.tokenizer.token_to_id("[PAD]")
         
+        xs = nn.utils.rnn.pad_sequence(
+            xs, padding_value=padding_val, batch_first=True
+        )
+    
         ys = torch.tensor(ys)
         return xs, ys, {"lengths": lengths}
 
@@ -230,7 +227,7 @@ class IMDB(SequenceDataset):
                 + (["<eos>"] if self.append_eos else [])
             )
             vocab = create_vocab_from_iterable(dataset['train']["tokens"], specials=special_tokens)
-
+            print("vocab :", list(vocab.items())[:5])
             numericalize = lambda example: {
                 "input_ids": tokens_to_indices(
                     (["<bos>"] if self.append_bos else [])
