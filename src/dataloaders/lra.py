@@ -227,7 +227,7 @@ class IMDB(SequenceDataset):
                 + (["<eos>"] if self.append_eos else [])
             )
             vocab = create_vocab_from_iterable(dataset['train']["tokens"], specials=special_tokens)
-            print("vocab :", list(vocab.items())[:5])
+            
             numericalize = lambda example: {
                 "input_ids": tokens_to_indices(
                     (["<bos>"] if self.append_bos else [])
