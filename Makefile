@@ -1,4 +1,4 @@
-.PHONY: autoformat lint dev lib torchtext cu126 pt260
+.PHONY: autoformat lint dev lib torchtext cu126 pt260 py312
 
 .ONESHELL:
 
@@ -48,3 +48,9 @@ cu126:
 pt260: cu126
 	pip uninstall -y torch torchaudio torchvision
 	pip install "torch>=2.6.0,<2.7" torchaudio torchvision --index-url https://download.pytorch.org/whl/cu126
+
+py312:
+	sudo add-apt-repository -y ppa:deadsnakes/ppa
+	DEBIAN_FRONTEND=noninteractive sudo apt-get install -y python3.12-full
+	sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 3
+	python -m ensurepip
